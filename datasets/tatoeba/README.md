@@ -3,7 +3,7 @@ annotations_creators:
 - found
 language_creators:
 - found
-languages:
+language:
 - ab
 - acm
 - ady
@@ -363,7 +363,7 @@ languages:
 - zsm
 - zu
 - zza
-licenses:
+license:
 - cc-by-2.0
 multilinguality:
 - multilingual
@@ -372,9 +372,8 @@ size_categories:
 source_datasets:
 - original
 task_categories:
-- conditional-text-generation
-task_ids:
-- machine-translation
+- translation
+task_ids: []
 paperswithcode_id: tatoeba
 pretty_name: Tatoeba
 ---

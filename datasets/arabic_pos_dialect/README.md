@@ -3,9 +3,9 @@ annotations_creators:
 - expert-generated
 language_creators:
 - found
-languages:
+language:
 - ar
-licenses:
+license:
 - apache-2.0
 multilinguality:
 - multilingual
@@ -14,7 +14,7 @@ size_categories:
 source_datasets:
 - extended
 task_categories:
-- structure-prediction
+- token-classification
 task_ids:
 - part-of-speech-tagging
 paperswithcode_id: null

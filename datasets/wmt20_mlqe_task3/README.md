@@ -5,10 +5,10 @@ annotations_creators:
 - machine-generated
 language_creators:
 - found
-languages:
+language:
 - en
 - fr
-licenses:
+license:
 - unknown
 multilinguality:
 - translation
@@ -17,9 +17,8 @@ size_categories:
 source_datasets:
 - extended|amazon_us_reviews
 task_categories:
-- conditional-text-generation
-task_ids:
-- machine-translation
+- translation
+task_ids: []
 paperswithcode_id: null
 ---
 

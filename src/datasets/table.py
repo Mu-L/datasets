@@ -1,6 +1,7 @@
 import copy
 import os
 import tempfile
+import warnings
 from functools import partial
 from itertools import groupby
 from typing import TYPE_CHECKING, Callable, List, Optional, Tuple, TypeVar, Union
@@ -799,7 +800,7 @@ class InMemoryTable(TableBlock):
         Returns:
             :class:`datasets.table.Table`:
         """
-        return InMemoryTable(self.table.flatten(*args, **kwargs))
+        return InMemoryTable(table_flatten(self.table, *args, **kwargs))
 
     def combine_chunks(self, *args, **kwargs):
         """
@@ -993,6 +994,8 @@ class MemoryMappedTable(TableBlock):
             for name, args, kwargs in replays:
                 if name == "cast":
                     table = table_cast(table, *args, **kwargs)
+                elif name == "flatten":
+                    table = table_flatten(table, *args, **kwargs)
                 else:
                     table = getattr(table, name)(*args, **kwargs)
         return table
@@ -1043,7 +1046,7 @@ class MemoryMappedTable(TableBlock):
         """
         replay = ("flatten", copy.deepcopy(args), copy.deepcopy(kwargs))
         replays = self._append_replay(replay)
-        return MemoryMappedTable(self.table.flatten(*args, **kwargs), self.path, replays)
+        return MemoryMappedTable(table_flatten(self.table, *args, **kwargs), self.path, replays)
 
     def combine_chunks(self, *args, **kwargs):
         """
@@ -1229,6 +1232,9 @@ class ConcatenationTable(Table):
     The first axis concatenates the tables along the axis 0 (it appends rows),
     while the second axis concatenates tables along the axis 1 (it appends columns).
 
+    If some columns are missing when concatenating on axis 0, they are filled with null values.
+    This is done using `pyarrow.concat_tables(tables, promote=True)`.
+
     You can access the fully combined table by accessing the ConcatenationTable.table attribute,
     and the blocks by accessing the ConcatenationTable.blocks attribute.
     """
@@ -1258,6 +1264,7 @@ class ConcatenationTable(Table):
     def _concat_blocks(blocks: List[Union[TableBlock, pa.Table]], axis: int = 0) -> pa.Table:
         pa_tables = [table.table if hasattr(table, "table") else table for table in blocks]
         if axis == 0:
+            # we set promote=True to fill missing columns with null values
             return pa.concat_tables(pa_tables, promote=True)
         elif axis == 1:
             for i, table in enumerate(pa_tables):
@@ -1432,7 +1439,7 @@ class ConcatenationTable(Table):
         Returns:
             :class:`datasets.table.Table`:
         """
-        table = self.table.flatten(*args, **kwargs)
+        table = table_flatten(self.table, *args, **kwargs)
         blocks = []
         for tables in self.blocks:
             blocks.append([t.flatten(*args, **kwargs) for t in tables])
@@ -1703,6 +1710,8 @@ def array_cast(array: pa.Array, pa_type: pa.DataType, allow_number_to_str=True):
         array = array.storage
     if isinstance(pa_type, pa.ExtensionType):
         return pa_type.wrap_array(array)
+    elif array.type == pa_type:
+        return array
     elif pa.types.is_struct(array.type):
         if pa.types.is_struct(pa_type) and (
             set(field.name for field in pa_type) == set(field.name for field in array.type)
@@ -1717,6 +1726,10 @@ def array_cast(array: pa.Array, pa_type: pa.DataType, allow_number_to_str=True):
                     pa_type.list_size,
                 )
         elif pa.types.is_list(pa_type):
+            if array.null_count > 0:
+                warnings.warn(
+                    f"None values are converted to empty lists when converting array to {pa_type}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                )
             return pa.ListArray.from_arrays(array.offsets, _c(array.values, pa_type.value_type))
     elif pa.types.is_fixed_size_list(array.type):
         if pa.types.is_fixed_size_list(pa_type):
@@ -1726,6 +1739,10 @@ def array_cast(array: pa.Array, pa_type: pa.DataType, allow_number_to_str=True):
             )
         elif pa.types.is_list(pa_type):
             offsets_arr = pa.array(range(len(array) + 1), pa.int32())
+            if array.null_count > 0:
+                warnings.warn(
+                    f"None values are converted to empty lists when converting array to {pa_type}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                )
             return pa.ListArray.from_arrays(offsets_arr, _c(array.values, pa_type.value_type))
     else:
         if (
@@ -1736,6 +1753,8 @@ def array_cast(array: pa.Array, pa_type: pa.DataType, allow_number_to_str=True):
             raise TypeError(
                 f"Couldn't cast array of type {array.type} to {pa_type} since allow_number_to_str is set to {allow_number_to_str}"
             )
+        if pa.types.is_null(pa_type) and not pa.types.is_null(array.type):
+            raise TypeError(f"Couldn't cast array of type {array.type} to {pa_type}")
         return array.cast(pa_type)
     raise TypeError(f"Couldn't cast array of type\n{array.type}\nto\n{pa_type}")
 
@@ -1782,16 +1801,36 @@ def cast_array_to_feature(array: pa.Array, feature: "FeatureType", allow_number_
     elif pa.types.is_list(array.type):
         # feature must be either [subfeature] or Sequence(subfeature)
         if isinstance(feature, list):
-            return pa.ListArray.from_arrays(array.offsets, _c(array.values, feature[0]))
+            casted_values = _c(array.values, feature[0])
+            if casted_values.type == array.values.type:
+                return array
+            else:
+                if array.null_count > 0:
+                    warnings.warn(
+                        f"None values are converted to empty lists when converting array to {feature}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                    )
+                return pa.ListArray.from_arrays(array.offsets, casted_values)
         elif isinstance(feature, Sequence):
             if feature.length > -1:
                 if feature.length * len(array) == len(array.values):
                     return pa.FixedSizeListArray.from_arrays(_c(array.values, feature.feature), feature.length)
             else:
-                return pa.ListArray.from_arrays(array.offsets, _c(array.values, feature.feature))
+                casted_values = _c(array.values, feature.feature)
+                if casted_values.type == array.values.type:
+                    return array
+                else:
+                    if array.null_count > 0:
+                        warnings.warn(
+                            f"None values are converted to empty lists when converting array to {feature}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                        )
+                    return pa.ListArray.from_arrays(array.offsets, _c(array.values, feature.feature))
     elif pa.types.is_fixed_size_list(array.type):
         # feature must be either [subfeature] or Sequence(subfeature)
         if isinstance(feature, list):
+            if array.null_count > 0:
+                warnings.warn(
+                    f"None values are converted to empty lists when converting array to {feature}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                )
             return pa.ListArray.from_arrays(array.offsets, _c(array.values, feature[0]))
         elif isinstance(feature, Sequence):
             if feature.length > -1:
@@ -1799,6 +1838,10 @@ def cast_array_to_feature(array: pa.Array, feature: "FeatureType", allow_number_
                     return pa.FixedSizeListArray.from_arrays(_c(array.values, feature.feature), feature.length)
             else:
                 offsets_arr = pa.array(range(len(array) + 1), pa.int32())
+                if array.null_count > 0:
+                    warnings.warn(
+                        f"None values are converted to empty lists when converting array to {feature}. More info: https://github.com/huggingface/datasets/issues/3676. This will raise an error in a future major version of `datasets`"
+                    )
                 return pa.ListArray.from_arrays(offsets_arr, _c(array.values, feature.feature))
     if pa.types.is_null(array.type):
         return array_cast(array, get_nested_type(feature), allow_number_to_str=allow_number_to_str)
@@ -1843,7 +1886,7 @@ def cast_table_to_schema(table: pa.Table, schema: pa.Schema):
 
 
 def table_cast(table: pa.Table, schema: pa.Schema):
-    """Improved version of pa.Table.cast
+    """Improved version of pa.Table.cast.
 
     It supports casting to feature types stored in the schema metadata.
 
@@ -1860,6 +1903,47 @@ def table_cast(table: pa.Table, schema: pa.Schema):
         return table.replace_schema_metadata(schema.metadata)
     else:
         return table
+
+
+def table_flatten(table: pa.Table):
+    """Improved version of pa.Table.flatten.
+
+    It behaves as pa.Table.flatten in a sense it does 1-step flatten of the columns with a struct type into one column per struct field,
+    but updates the metadata and skips decodable features unless the `decode` attribute of these features is set to False.
+
+    Args:
+        table (Table): PyArrow table to flatten
+
+    Returns:
+        Table: the flattened table
+    """
+    from .features import Features
+
+    features = Features.from_arrow_schema(table.schema)
+    if any(hasattr(subfeature, "flatten") and subfeature.flatten() == subfeature for subfeature in features.values()):
+        flat_arrays = []
+        flat_column_names = []
+        for field in table.schema:
+            array = table.column(field.name)
+            subfeature = features[field.name]
+            if pa.types.is_struct(field.type) and (
+                not hasattr(subfeature, "flatten") or subfeature.flatten() != subfeature
+            ):
+                flat_arrays.extend(array.flatten())
+                flat_column_names.extend([f"{field.name}.{subfield.name}" for subfield in field.type])
+            else:
+                flat_arrays.append(array)
+                flat_column_names.append(field.name)
+        flat_table = pa.Table.from_arrays(
+            flat_arrays,
+            names=flat_column_names,
+        )
+    else:
+        flat_table = table.flatten()
+    # Preserve complex types in the metadata
+    flat_features = features.flatten(max_depth=2)
+    flat_features = Features({column_name: flat_features[column_name] for column_name in flat_table.column_names})
+    return flat_table.replace_schema_metadata(flat_features.arrow_schema.metadata)
 
 
 def table_visitor(table: pa.Table, function: Callable[[pa.Array], None]):

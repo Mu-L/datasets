@@ -4,7 +4,7 @@ annotations_creators:
 - crowdsourced
 language_creators:
 - crowdsourced
-languages:
+language:
 - ar
 - br
 - ca
@@ -50,7 +50,7 @@ languages:
 - zh-CN
 - zh-HK
 - zh-TW
-licenses:
+license:
 - cc-by-4.0
 multilinguality:
 - multilingual
@@ -59,9 +59,9 @@ size_categories:
 source_datasets:
 - extended|common_voice
 task_categories:
-- speech-processing
+- audio-classification
 task_ids:
-- other-other-speech-classification
+- speaker-language-identification
 ---
 
 # Dataset Card for common_language

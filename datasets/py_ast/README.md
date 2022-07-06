@@ -4,10 +4,10 @@ annotations_creators:
 - machine-generated
 language_creators:
 - found
-languages:
+language:
 - code
-licenses:
-- 0bsd
+license:
+- bsd-2-clause
 - mit
 multilinguality:
 - monolingual
@@ -16,9 +16,11 @@ size_categories:
 source_datasets:
 - original
 task_categories:
-- sequence-modeling
-task_ids:
-- sequence-modeling-other-code-modeling
+- text-generation
+- fill-mask
+- text-generation
+- fill-mask
+- text-generation-other-code-modeling
 paperswithcode_id: null
 ---
 # Dataset Card for [py_ast]

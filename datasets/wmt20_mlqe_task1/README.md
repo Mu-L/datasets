@@ -5,29 +5,16 @@ annotations_creators:
 - machine-generated
 language_creators:
 - found
-languages:
-  en-de:
-  - en
-  - de
-  en-zh:
-  - en
-  - zh
-  et-en:
-  - et
-  - en
-  ne-en:
-  - ne
-  - en
-  ro-en:
-  - ro
-  - en
-  si-en:
-  - si
-  - en
-  ru-en:
-  - en
-  - ru
-licenses:
+language:
+- de
+- en
+- et
+- ne
+- ro
+- ru
+- si
+- zh
+license:
 - unknown
 multilinguality:
 - translation
@@ -37,10 +24,17 @@ source_datasets:
 - extended|reddit
 - extended|wikipedia
 task_categories:
-- conditional-text-generation
-task_ids:
-- machine-translation
+- translation
+task_ids: []
 paperswithcode_id: null
+configs:
+- en-de
+- en-zh
+- et-en
+- ne-en
+- ro-en
+- ru-en
+- si-en
 ---
 
 # Dataset Card Creation Guide
